@@ -10,13 +10,17 @@ def patient_list():
     conn = db.get_db_connection()
     cursor = conn.cursor()
     try:
-        # 1. 현재 대기 중인 환자 목록 (진료실에 띄워줄 대상)
+        # 1. 현재 대기 중인 환자 목록 (DOCTORS 테이블 조인하여 의사 이름 DOC_NAME 추출)
         cursor.execute("""
-            SELECT A.RECEPTION_ID, P.PATIENT_NAME, P.GENDER, 
+            SELECT A.RECEPTION_ID, 
+                   P.PATIENT_NAME, 
+                   P.GENDER, 
                    TO_CHAR(A.RECEPT_DT, 'HH24:MI') AS RECEPT_TIME,
-                   A.DOCTOR_ID, A.STATUS
+                   D.DOC_NAME, 
+                   A.STATUS
             FROM APPOINTMENTS A
             JOIN PATIENTS P ON A.PATIENT_ID = P.PATIENT_ID
+            LEFT JOIN DOCTORS D ON A.DOCTOR_ID = D.DOCTOR_ID
             WHERE A.STATUS = '대기중'
             ORDER BY A.RECEPT_DT ASC
         """)
@@ -83,7 +87,6 @@ def add_queue():
     conn = db.get_db_connection()
     cursor = conn.cursor()
     try:
-        # APPT_DT(예약일자)는 NULL, RECEPT_DT(접수시간)는 SYSDATE로 INSERT
         cursor.execute("""
             INSERT INTO APPOINTMENTS (RECEPTION_ID, PATIENT_ID, DOCTOR_ID, RECEPT_DT, APPT_DT, STATUS, APPT_TYPE)
             VALUES (:1, :2, :3, SYSDATE, NULL, '대기중', '당일접수')
@@ -109,7 +112,6 @@ def add_appointment():
     conn = db.get_db_connection()
     cursor = conn.cursor()
     try:
-        # RECEPT_DT(접수시간)는 아직 안 왔으므로 NULL, APPT_DT는 선택한 날짜로 INSERT
         cursor.execute("""
             INSERT INTO APPOINTMENTS (RECEPTION_ID, PATIENT_ID, DOCTOR_ID, RECEPT_DT, APPT_DT, STATUS, APPT_TYPE)
             VALUES (:1, :2, :3, NULL, TO_DATE(:4, 'YYYY-MM-DD"T"HH24:MI'), '예약완료', '일반진료')
@@ -132,7 +134,6 @@ def checkin():
     conn = db.get_db_connection()
     cursor = conn.cursor()
     try:
-        # 새로 INSERT 하지 않고, 기존 예약 내역의 상태를 변경하고 도착시간(RECEPT_DT) 기록
         cursor.execute("""
             UPDATE APPOINTMENTS 
             SET STATUS = '대기중', RECEPT_DT = SYSDATE 

@@ -35,10 +35,10 @@
                     <td><strong>{{ w.PATIENT_NAME }}</strong></td>
                     <td>{{ '남성' if w.GENDER == 'M' else '여성' }}</td>
                     <td class="text-primary fw-bold">{{ w.RECEPT_TIME }}</td>
-                    <td>{{ w.DOCTOR_ID }}</td>
+                    <!-- 의사 이름으로 출력 -->
+                    <td><span class="badge bg-light text-dark border">{{ w.DOC_NAME }} 의사</span></td>
                     <td><span class="badge bg-warning text-dark">{{ w.STATUS }}</span></td>
                     <td>
-                        <!-- DELETE 기능을 통해 잘못된 접수 삭제 -->
                         <form action="{{ url_for('reception.delete_queue') }}" method="POST" style="display:inline;" onsubmit="return confirm('이 대기열을 삭제하시겠습니까?');">
                             <input type="hidden" name="reception_id" value="{{ w.RECEPTION_ID }}">
                             <button type="submit" class="btn btn-sm btn-danger">접수 취소 (삭제)</button>
@@ -103,12 +103,10 @@
                     <td>
                         <div class="btn-group" role="group">
                             {% if p.STATUS == '예약완료' %}
-                                <!-- 1. 예약 환자 내원 (UPDATE) -->
                                 <form action="{{ url_for('reception.checkin') }}" method="POST" style="display:inline;">
                                     <input type="hidden" name="reception_id" value="{{ p.RECEPTION_ID }}">
                                     <button type="submit" class="btn btn-sm btn-warning">내원 확인(대기열 전환)</button>
                                 </form>
-                                <!-- 예약 취소 (DELETE) -->
                                 <form action="{{ url_for('reception.delete_queue') }}" method="POST" style="display:inline;" onsubmit="return confirm('예약을 취소하시겠습니까?');">
                                     <input type="hidden" name="reception_id" value="{{ p.RECEPTION_ID }}">
                                     <button type="submit" class="btn btn-sm btn-outline-danger ms-1">예약 취소</button>
@@ -118,11 +116,9 @@
                             {% elif p.STATUS == '진료중' %}
                                 <button type="button" class="btn btn-sm btn-outline-secondary" disabled>진료 진행 중</button>
                             {% else %}
-                                <!-- 2. 당일 현장 내원 (INSERT, APPT_DT NULL) -->
                                 <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#queueModal-{{ p.PATIENT_ID }}">
                                     당일 접수 (대기열 추가)
                                 </button>
-                                <!-- 3. 미래 일정 예약 (INSERT, RECEPT_DT NULL) -->
                                 <button type="button" class="btn btn-sm btn-outline-success ms-1" data-bs-toggle="modal" data-bs-target="#bookModal-{{ p.PATIENT_ID }}">
                                     일정 예약
                                 </button>
@@ -131,7 +127,7 @@
                     </td>
                 </tr>
 
-                <!-- 당일 대기열 추가 폼 모달 -->
+                <!-- 당일 대기열 추가 모달 -->
                 <div class="modal fade" id="queueModal-{{ p.PATIENT_ID }}" tabindex="-1" aria-hidden="true">
                     <div class="modal-dialog">
                         <div class="modal-content">
@@ -161,7 +157,7 @@
                     </div>
                 </div>
 
-                <!-- 미래 일정 예약 폼 모달 -->
+                <!-- 미래 일정 예약 모달 -->
                 <div class="modal fade" id="bookModal-{{ p.PATIENT_ID }}" tabindex="-1" aria-hidden="true">
                     <div class="modal-dialog">
                         <div class="modal-content">
