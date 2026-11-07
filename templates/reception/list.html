@@ -5,15 +5,15 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2>👥 환자 접수 및 대기열 관리</h2>
-    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#registerModal">
+    <button type="button" class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#registerModal">
         + 신규 환자 등록
     </button>
 </div>
 
-<!-- 1구역: 당일 진료 대기열 모니터링 (진료실 연동 전용) -->
+<!-- 1구역: 당일 진료/검사 진행 모니터링 -->
 <div class="card shadow-sm border-warning mb-5">
     <div class="card-header bg-warning text-dark fw-bold">
-        ⏳ 현재 진료 대기 중인 환자 (진료실 노출 대상)
+        ⏳ 현재 원내 대기 및 진행 환자 현황
     </div>
     <div class="card-body p-0">
         <table class="table table-hover mb-0 text-center align-middle">
@@ -24,7 +24,7 @@
                     <th>성별</th>
                     <th>접수시간</th>
                     <th>담당 의사</th>
-                    <th>상태</th>
+                    <th>진행 상태</th>
                     <th>대기열 관리</th>
                 </tr>
             </thead>
@@ -35,20 +35,35 @@
                     <td><strong>{{ w.PATIENT_NAME }}</strong></td>
                     <td>{{ '남성' if w.GENDER == 'M' else '여성' }}</td>
                     <td class="text-primary fw-bold">{{ w.RECEPT_TIME }}</td>
-                    <!-- 의사 이름으로 출력 -->
                     <td><span class="badge bg-light text-dark border">{{ w.DOC_NAME }} 의사</span></td>
-                    <td><span class="badge bg-warning text-dark">{{ w.STATUS }}</span></td>
                     <td>
-                        <form action="{{ url_for('reception.delete_queue') }}" method="POST" style="display:inline;" onsubmit="return confirm('이 대기열을 삭제하시겠습니까?');">
-                            <input type="hidden" name="reception_id" value="{{ w.RECEPTION_ID }}">
-                            <button type="submit" class="btn btn-sm btn-danger">접수 취소 (삭제)</button>
-                        </form>
+                        {% if w.STATUS == '대기중' %}
+                            <span class="badge bg-warning text-dark">진료대기</span>
+                        {% elif w.STATUS == '진료중' %}
+                            <span class="badge bg-primary">진료중</span>
+                        {% elif w.STATUS in ['검사대기', '검사중'] %}
+                            <span class="badge bg-danger">🔬 검사중</span>
+                        {% elif w.STATUS == '검사완료' %}
+                            <span class="badge bg-info text-dark">재진대기(검사완료)</span>
+                        {% else %}
+                            <span class="badge bg-secondary">{{ w.STATUS }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if w.STATUS == '대기중' %}
+                            <form action="{{ url_for('reception.delete_queue') }}" method="POST" style="display:inline;" onsubmit="return confirm('이 대기열을 삭제하시겠습니까?');">
+                                <input type="hidden" name="reception_id" value="{{ w.RECEPTION_ID }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">접수 취소</button>
+                            </form>
+                        {% else %}
+                            <span class="text-muted small">진행 중 (취소 불가)</span>
+                        {% endif %}
                     </td>
                 </tr>
                 {% else %}
                 <tr>
                     <td colspan="7" class="text-center py-4 text-muted">
-                        현재 대기 중인 환자가 없습니다.
+                        현재 대기 또는 진행 중인 환자가 없습니다.
                     </td>
                 </tr>
                 {% endfor %}
@@ -58,8 +73,22 @@
 </div>
 
 <!-- 2구역: 전체 환자 목록 및 신규 예약/접수 관리 -->
-<h4 class="mb-3">📋 전체 환자 목록 및 일정 관리</h4>
-<div class="card shadow-sm">
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0">📋 전체 환자 목록 및 일정 관리</h4>
+    
+    <!-- 표 바깥 우측 상단 검색창 -->
+    <form method="GET" action="{{ url_for('reception.patient_list') }}" class="d-flex" style="max-width: 320px;">
+        <div class="input-group input-group-sm">
+            <input type="text" class="form-control" name="search" value="{{ search_keyword or '' }}" placeholder="이름, 환자번호, 연락처 검색...">
+            <button class="btn btn-outline-primary" type="submit">검색</button>
+            {% if search_keyword %}
+                <a href="{{ url_for('reception.patient_list') }}" class="btn btn-outline-secondary">초기화</a>
+            {% endif %}
+        </div>
+    </form>
+</div>
+
+<div class="card shadow-sm mb-4">
     <div class="card-body p-0">
         <table class="table table-hover mb-0 text-center align-middle">
             <thead class="table-light">
@@ -68,15 +97,16 @@
                     <th>이름</th>
                     <th>생년월일</th>
                     <th>연락처</th>
-                    <th>최근 예약일시</th>
+                    <th>예약일시</th>
                     <th>현재상태</th>
+                    <th>정보관리</th>
                     <th>접수 및 예약 추가</th>
                 </tr>
             </thead>
             <tbody>
                 {% for p in patients %}
                 <tr>
-                    <td>{{ p.PATIENT_ID }}</td>
+                    <td><code>{{ p.PATIENT_ID }}</code></td>
                     <td><strong>{{ p.PATIENT_NAME }}</strong></td>
                     <td>{{ p.BIRTH_DATE }}</td>
                     <td>{{ p.PHONE }}</td>
@@ -89,16 +119,29 @@
                     </td>
                     <td>
                         {% if p.STATUS == '대기중' %}
-                            <span class="badge bg-warning text-dark">대기중</span>
+                            <span class="badge bg-warning text-dark">진료대기</span>
                         {% elif p.STATUS == '진료중' %}
                             <span class="badge bg-primary">진료중</span>
+                        {% elif p.STATUS in ['검사대기', '검사중'] %}
+                            <span class="badge bg-danger">🔬 검사중</span>
+                        {% elif p.STATUS == '검사완료' %}
+                            <span class="badge bg-info text-dark">재진대기</span>
+                        {% elif p.STATUS in ['입원대기', '입원중'] %}
+                            <span class="badge bg-dark">🏥 입원중</span>
+                        {% elif p.STATUS in ['진료완료', '퇴원수납대기'] %}
+                            <span class="badge bg-success">💳 수납대기</span>
+                        {% elif p.STATUS == '수납완료' %}
+                            <span class="badge bg-secondary">귀가/완료</span>
                         {% elif p.STATUS == '예약완료' %}
                             <span class="badge bg-info text-dark">예약완료</span>
-                        {% elif p.STATUS == '진료완료' %}
-                            <span class="badge bg-success">진료완료</span>
                         {% else %}
-                            <span class="badge bg-secondary">미접수</span>
+                            <span class="badge bg-light text-muted border">미접수</span>
                         {% endif %}
+                    </td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#editModal-{{ p.PATIENT_ID }}">
+                            ✏️ 수정
+                        </button>
                     </td>
                     <td>
                         <div class="btn-group" role="group">
@@ -112,9 +155,17 @@
                                     <button type="submit" class="btn btn-sm btn-outline-danger ms-1">예약 취소</button>
                                 </form>
                             {% elif p.STATUS == '대기중' %}
-                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled>대기열 등록됨</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled>진료 대기 중</button>
                             {% elif p.STATUS == '진료중' %}
                                 <button type="button" class="btn btn-sm btn-outline-secondary" disabled>진료 진행 중</button>
+                            {% elif p.STATUS in ['검사대기', '검사중'] %}
+                                <button type="button" class="btn btn-sm btn-outline-danger" disabled>검사 진행 중</button>
+                            {% elif p.STATUS == '검사완료' %}
+                                <button type="button" class="btn btn-sm btn-outline-info" disabled>결과 확인 대기</button>
+                            {% elif p.STATUS in ['입원대기', '입원중'] %}
+                                <button type="button" class="btn btn-sm btn-outline-dark" disabled>병동 입원 중</button>
+                            {% elif p.STATUS in ['진료완료', '퇴원수납대기'] %}
+                                <button type="button" class="btn btn-sm btn-outline-success" disabled>수납 진행 중</button>
                             {% else %}
                                 <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#queueModal-{{ p.PATIENT_ID }}">
                                     당일 접수 (대기열 추가)
@@ -126,72 +177,15 @@
                         </div>
                     </td>
                 </tr>
-
-                <!-- 당일 대기열 추가 모달 -->
-                <div class="modal fade" id="queueModal-{{ p.PATIENT_ID }}" tabindex="-1" aria-hidden="true">
-                    <div class="modal-dialog">
-                        <div class="modal-content">
-                            <form action="{{ url_for('reception.add_queue') }}" method="POST">
-                                <input type="hidden" name="patient_id" value="{{ p.PATIENT_ID }}">
-                                <div class="modal-header">
-                                    <h5 class="modal-title">당일 현장 접수 - {{ p.PATIENT_NAME }} 님</h5>
-                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                </div>
-                                <div class="modal-body text-start">
-                                    <div class="mb-3">
-                                        <label class="form-label">담당 의사 배정</label>
-                                        <select class="form-select" name="doctor_id" required>
-                                            <option value="DOC01">이종석 (DOC01)</option>
-                                            <option value="DOC02">김지훈 (DOC02)</option>
-                                            <option value="DOC03">박민수 (DOC03)</option>
-                                        </select>
-                                    </div>
-                                    <p class="text-muted small">※ 확인 시 즉시 대기열에 추가되며 진료실 화면에 노출됩니다.</p>
-                                </div>
-                                <div class="modal-footer">
-                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
-                                    <button type="submit" class="btn btn-primary">대기열에 추가</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 미래 일정 예약 모달 -->
-                <div class="modal fade" id="bookModal-{{ p.PATIENT_ID }}" tabindex="-1" aria-hidden="true">
-                    <div class="modal-dialog">
-                        <div class="modal-content">
-                            <form action="{{ url_for('reception.add_appointment') }}" method="POST">
-                                <input type="hidden" name="patient_id" value="{{ p.PATIENT_ID }}">
-                                <div class="modal-header">
-                                    <h5 class="modal-title">미래 일정 예약 - {{ p.PATIENT_NAME }} 님</h5>
-                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                </div>
-                                <div class="modal-body text-start">
-                                    <div class="mb-3">
-                                        <label class="form-label">예약 날짜 및 시간</label>
-                                        <input type="datetime-local" class="form-control" name="appt_dt" required>
-                                    </div>
-                                    <div class="mb-3">
-                                        <label class="form-label">담당 의사 선택</label>
-                                        <select class="form-select" name="doctor_id" required>
-                                            <option value="DOC01">이종석 (DOC01)</option>
-                                            <option value="DOC02">김지훈 (DOC02)</option>
-                                            <option value="DOC03">박민수 (DOC03)</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div class="modal-footer">
-                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
-                                    <button type="submit" class="btn btn-success">예약 완료</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                </div>
                 {% else %}
                 <tr>
-                    <td colspan="7" class="text-center py-5 text-muted">등록된 환자가 없습니다.</td>
+                    <td colspan="8" class="text-center py-5 text-muted">
+                        {% if search_keyword %}
+                            검색 결과와 일치하는 환자가 없습니다.
+                        {% else %}
+                            등록된 환자가 없습니다.
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -199,34 +193,143 @@
     </div>
 </div>
 
+<!-- ==================== 테이블 바깥 모달 정의 구역 ==================== -->
+{% for p in patients %}
+<!-- 1. 환자 정보 수정 모달 -->
+<div class="modal fade" id="editModal-{{ p.PATIENT_ID }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form action="{{ url_for('reception.edit_patient') }}" method="POST">
+                <input type="hidden" name="patient_id" value="{{ p.PATIENT_ID }}">
+                <div class="modal-header bg-secondary text-white">
+                    <h5 class="modal-title">✏️ 환자 정보 수정 - {{ p.PATIENT_ID }}</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-start">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">환자번호(ID)</label>
+                        <input type="text" class="form-control bg-light" value="{{ p.PATIENT_ID }}" disabled>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">성명</label>
+                        <input type="text" class="form-control" name="patient_name" value="{{ p.PATIENT_NAME }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">생년월일</label>
+                        <input type="date" class="form-control" name="birth_date" value="{{ p.BIRTH_DATE }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">연락처</label>
+                        <input type="text" class="form-control" name="phone" value="{{ p.PHONE }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">성별</label>
+                        <select class="form-select" name="gender" required>
+                            <option value="M" {% if p.GENDER == 'M' %}selected{% endif %}>남성 (M)</option>
+                            <option value="F" {% if p.GENDER == 'F' %}selected{% endif %}>여성 (F)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-primary">변경사항 저장</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 2. 당일 대기열 추가 모달 -->
+<div class="modal fade" id="queueModal-{{ p.PATIENT_ID }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form action="{{ url_for('reception.add_queue') }}" method="POST">
+                <input type="hidden" name="patient_id" value="{{ p.PATIENT_ID }}">
+                <div class="modal-header">
+                    <h5 class="modal-title">당일 현장 접수 - {{ p.PATIENT_NAME }} 님</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-start">
+                    <div class="mb-3">
+                        <label class="form-label">담당 의사 배정</label>
+                        <select class="form-select" name="doctor_id" required>
+                            <option value="DOC01">이종석 (DOC01)</option>
+                            <option value="DOC02">김지훈 (DOC02)</option>
+                            <option value="DOC03">박민수 (DOC03)</option>
+                        </select>
+                    </div>
+                    <p class="text-muted small">※ 확인 시 즉시 대기열에 추가되며 진료실 화면에 노출됩니다.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-primary">대기열에 추가</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 3. 미래 일정 예약 모달 -->
+<div class="modal fade" id="bookModal-{{ p.PATIENT_ID }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form action="{{ url_for('reception.add_appointment') }}" method="POST">
+                <input type="hidden" name="patient_id" value="{{ p.PATIENT_ID }}">
+                <div class="modal-header">
+                    <h5 class="modal-title">미래 일정 예약 - {{ p.PATIENT_NAME }} 님</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-start">
+                    <div class="mb-3">
+                        <label class="form-label">예약 날짜 및 시간</label>
+                        <input type="datetime-local" class="form-control" name="appt_dt" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">담당 의사 선택</label>
+                        <select class="form-select" name="doctor_id" required>
+                            <option value="DOC01">이종석 (DOC01)</option>
+                            <option value="DOC02">김지훈 (DOC02)</option>
+                            <option value="DOC03">박민수 (DOC03)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-success">예약 완료</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
 <!-- 신규 환자 등록 모달 -->
 <div class="modal fade" id="registerModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <form action="{{ url_for('reception.add_patient') }}" method="POST">
-                <div class="modal-header">
+                <div class="modal-header bg-primary text-white">
                     <h5 class="modal-title">신규 환자 정보 입력</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">환자번호(ID)</label>
-                        <input type="text" class="form-control" name="patient_id" placeholder="예: P24003" required>
+                    <div class="alert alert-info py-2 small mb-3">
+                        ℹ️ <strong>환자번호</strong>는 등록 시 <code>P + 해당 년도 + 4자리 Index</code> 형식으로 자동 순번 부여됩니다.
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">이름</label>
-                        <input type="text" class="form-control" name="patient_name" required>
+                        <label class="form-label fw-bold">환자 성명</label>
+                        <input type="text" class="form-control" name="patient_name" placeholder="예: 홍길동" required>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">생년월일</label>
+                        <label class="form-label fw-bold">생년월일</label>
                         <input type="date" class="form-control" name="birth_date" required>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">연락처</label>
-                        <input type="text" class="form-control" name="phone" required>
+                        <label class="form-label fw-bold">연락처</label>
+                        <input type="text" class="form-control" name="phone" placeholder="010-0000-0000" required>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">성별</label>
+                        <label class="form-label fw-bold">성별</label>
                         <select class="form-select" name="gender" required>
                             <option value="M">남성 (M)</option>
                             <option value="F">여성 (F)</option>
@@ -235,7 +338,7 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
-                    <button type="submit" class="btn btn-primary">등록 완료</button>
+                    <button type="submit" class="btn btn-primary fw-bold">등록 완료</button>
                 </div>
             </form>
         </div>
