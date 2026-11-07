@@ -6,19 +6,19 @@ clinic_bp = Blueprint('clinic', __name__)
 
 @clinic_bp.route('/')
 def patient_list():
-    """의사별 대기열 및 환자 관리"""
+    """의사별 대기열 및 환자 관리 (과거 EMR 이력 포함)"""
     doctor_id = request.args.get('doctor_id', 'DOC01')
     
     conn = db.get_db_connection()
     cursor = conn.cursor()
     try:
-        # 1. 의사 목록 (상단 필터용)
+        # 1. 의사 목록
         cursor.execute("SELECT DOCTOR_ID, DOC_NAME FROM DOCTORS ORDER BY DOCTOR_ID")
         doctors = [dict(zip([c[0] for c in cursor.description], row)) for row in cursor.fetchall()]
         
-        # 2. 진료실 대기 환자 (대기중, 진료중, 검사완료 상태)
+        # 2. 진료실 대기 환자 목록
         cursor.execute("""
-            SELECT A.RECEPTION_ID, P.PATIENT_NAME, P.GENDER, 
+            SELECT A.RECEPTION_ID, P.PATIENT_ID, P.PATIENT_NAME, P.GENDER, 
                    TO_CHAR(P.BIRTH_DATE, 'YYYY-MM-DD') AS BIRTH_DATE,
                    A.STATUS, TO_CHAR(A.RECEPT_DT, 'HH24:MI') AS RECEPT_TIME,
                    M.RECORD_ID, M.SYMPTOM
@@ -32,7 +32,7 @@ def patient_list():
         """, (doctor_id,))
         patients = [dict(zip([c[0] for c in cursor.description], row)) for row in cursor.fetchall()]
 
-        # 3. 환자별 검사 결과 조회 매핑
+        # 3. 현재 검사 결과 및 과거 진료 이력 조회
         for p in patients:
             if p.get('RECORD_ID'):
                 cursor.execute("""
@@ -50,6 +50,33 @@ def patient_list():
             else:
                 p['test_results'] = []
 
+            cursor.execute("""
+                SELECT MR.RECORD_ID, 
+                       TO_CHAR(MR.TREATMENT_DT, 'YYYY-MM-DD HH24:MI') AS TREAT_TIME,
+                       D.DOC_NAME,
+                       MR.SYMPTOM,
+                       MR.DIAGNOSIS
+                FROM MEDICAL_RECORDS MR
+                JOIN APPOINTMENTS AP ON MR.RECEPTION_ID = AP.RECEPTION_ID
+                JOIN DOCTORS D ON AP.DOCTOR_ID = D.DOCTOR_ID
+                WHERE AP.PATIENT_ID = :1 AND AP.RECEPTION_ID != :2
+                ORDER BY MR.TREATMENT_DT DESC
+            """, (p['PATIENT_ID'], p['RECEPTION_ID']))
+            h_cols = [c[0] for c in cursor.description]
+            past_records = [dict(zip(h_cols, row)) for row in cursor.fetchall()]
+
+            for pr in past_records:
+                cursor.execute("""
+                    SELECT M.MED_NAME, PR.DOSE_AMOUNT, PR.DAILY_COUNT, PR.TOTAL_DAYS
+                    FROM PRESCRIPTIONS PR
+                    JOIN MEDICINES M ON PR.MED_ID = M.MED_ID
+                    WHERE PR.RECORD_ID = :1
+                """, (pr['RECORD_ID'],))
+                p_cols = [c[0] for c in cursor.description]
+                pr['prescriptions'] = [dict(zip(p_cols, row)) for row in cursor.fetchall()]
+
+            p['past_history'] = past_records
+
         # 4. 검사 항목 및 약품 기초 데이터
         cursor.execute("SELECT TEST_CODE, TEST_NAME FROM TEST_ITEMS ORDER BY TEST_CODE")
         test_items = [dict(zip([c[0] for c in cursor.description], row)) for row in cursor.fetchall()]
@@ -65,7 +92,6 @@ def patient_list():
 
 @clinic_bp.route('/start_treatment', methods=['POST'])
 def start_treatment():
-    """진료 시작 (상태를 '진료중'으로 변경)"""
     reception_id = request.form.get('reception_id')
     doctor_id = request.form.get('doctor_id')
     
@@ -83,8 +109,8 @@ def start_treatment():
 
 @clinic_bp.route('/save_treatment', methods=['POST'])
 def save_treatment():
-    """진료 저장: 검사 오더 또는 최종 진료 완료 분기 처리"""
-    action = request.form.get('action') # 'order_test' 또는 'complete'
+    """진료 저장: 검사 오더, 일반 수납 이관, 또는 입원 지시 분기 처리"""
+    action = request.form.get('action')  # 'order_test', 'complete', 'admit'
     reception_id = request.form.get('reception_id')
     record_id = request.form.get('record_id')
     doctor_id = request.form.get('doctor_id')
@@ -92,31 +118,31 @@ def save_treatment():
     diagnosis = request.form.get('diagnosis')
     test_codes = request.form.getlist('test_codes')
     
-    # 약품 처방 리스트
     med_ids = request.form.getlist('med_id[]')
     dose_amounts = request.form.getlist('dose_amount[]')
     daily_counts = request.form.getlist('daily_count[]')
     total_days = request.form.getlist('total_days[]')
 
+    # 진료 완료 또는 입원 지시일 경우 diagnosis 값을 그대로 저장
+    save_diagnosis = diagnosis if action in ['complete', 'admit'] else None
+
     conn = db.get_db_connection()
     cursor = conn.cursor()
     try:
-        # 기존 RECORD_ID가 없으면 신규 발급
         if not record_id:
             record_id = 'REC' + datetime.datetime.now().strftime('%Y%m%d%H%M%S')
             cursor.execute("""
                 INSERT INTO MEDICAL_RECORDS (RECORD_ID, RECEPTION_ID, TREATMENT_DT, SYMPTOM, DIAGNOSIS)
                 VALUES (:1, :2, SYSDATE, :3, :4)
-            """, (record_id, reception_id, symptom, diagnosis if action == 'complete' else None))
+            """, (record_id, reception_id, symptom, save_diagnosis))
         else:
             cursor.execute("""
                 UPDATE MEDICAL_RECORDS 
                 SET SYMPTOM = :1, DIAGNOSIS = :2 
                 WHERE RECORD_ID = :3
-            """, (symptom, diagnosis, record_id))
+            """, (symptom, save_diagnosis, record_id))
 
         if action == 'order_test':
-            # 1. 검사 오더 처리 -> 검사실 이관
             if not test_codes:
                 flash("선택된 검사 항목이 없습니다. 검사를 체크해 주세요.", "error")
                 return redirect(url_for('clinic.patient_list', doctor_id=doctor_id))
@@ -131,8 +157,8 @@ def save_treatment():
             cursor.execute("UPDATE APPOINTMENTS SET STATUS = '검사대기' WHERE RECEPTION_ID = :1", (reception_id,))
             flash("검사 오더가 발행되어 환자가 검사실로 이동했습니다.", "success")
 
-        elif action == 'complete':
-            # 2. 최종 진료 완료 처리 -> 수납 이관
+        elif action in ['complete', 'admit']:
+            # 처방 약품 등록
             for i in range(len(med_ids)):
                 if med_ids[i] and dose_amounts[i] and daily_counts[i] and total_days[i]:
                     dose = max(0.1, float(dose_amounts[i]))
@@ -143,9 +169,13 @@ def save_treatment():
                         INSERT INTO PRESCRIPTIONS (PRES_ID, RECORD_ID, MED_ID, DOSE_AMOUNT, DAILY_COUNT, TOTAL_DAYS)
                         VALUES (:1, :2, :3, :4, :5, :6)
                     """, (pres_id, record_id, med_ids[i], dose, daily, days))
-                    
-            cursor.execute("UPDATE APPOINTMENTS SET STATUS = '진료완료' WHERE RECEPTION_ID = :1", (reception_id,))
-            flash("진료 및 처방이 완료되어 환자가 수납 대기열로 이동했습니다.", "success")
+            
+            if action == 'complete':
+                cursor.execute("UPDATE APPOINTMENTS SET STATUS = '진료완료' WHERE RECEPTION_ID = :1", (reception_id,))
+                flash("진료 및 처방이 완료되어 환자가 수납 대기열로 이동했습니다.", "success")
+            else: # admit
+                cursor.execute("UPDATE APPOINTMENTS SET STATUS = '입원대기' WHERE RECEPTION_ID = :1", (reception_id,))
+                flash("입원 지시가 내려졌습니다. 환자가 원무과 입원 수속 창구로 이동합니다.", "info")
             
         conn.commit()
     except Exception as e:

@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}입·퇴원 관리 - Hospital PMS{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>🏥 입·퇴원 및 병동 관리</h2>
+</div>
+
+<!-- 1. 병동/병상 시각화 대시보드 -->
+<div class="card shadow-sm border-secondary mb-4">
+    <div class="card-header bg-secondary text-white fw-bold">
+        🛏️ 실시간 병상 현황판
+    </div>
+    <div class="card-body">
+        <div class="row">
+            {% for room_name, beds in rooms.items() %}
+            <div class="col-md-6 mb-3">
+                <div class="card border-light h-100">
+                    <div class="card-header bg-light fw-bold text-dark border-bottom-0">
+                        🚪 {{ room_name }}
+                    </div>
+                    <div class="card-body py-2">
+                        <div class="d-flex flex-wrap gap-2">
+                            {% for b in beds %}
+                                {% if b.BED_STATUS == '사용중' %}
+                                    <div class="p-2 border rounded bg-danger text-white text-center" style="width: 100px;">
+                                        <div class="small fw-bold">{{ b.BED_NO }}</div>
+                                        <div class="small text-truncate" title="{{ b.PATIENT_NAME }}">{{ b.PATIENT_NAME }}</div>
+                                    </div>
+                                {% else %}
+                                    <div class="p-2 border rounded bg-success text-white text-center" style="width: 100px;">
+                                        <div class="small fw-bold">{{ b.BED_NO }}</div>
+                                        <div class="small">비어있음</div>
+                                    </div>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- 2. 입원 대기(가능) 환자 목록 -->
+    <div class="col-md-12 mb-4">
+        <div class="card shadow-sm border-primary">
+            <div class="card-header bg-primary text-white fw-bold">
+                📋 입원 수속 가능 환자 (최근 진료 완료)
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0 text-center align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>접수번호</th>
+                            <th>환자명</th>
+                            <th>진단명</th>
+                            <th>담당의</th>
+                            <th>입원 관리</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in pending_patients %}
+                        <tr>
+                            <td>{{ p.RECEPTION_ID }}</td>
+                            <td><strong>{{ p.PATIENT_NAME }}</strong></td>
+                            <td class="text-danger fw-bold">{{ p.DIAGNOSIS or '미기록' }}</td>
+                            <td>{{ p.DOC_NAME }} 의사</td>
+                            <td>
+                                <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#admitModal-{{ p.RECEPTION_ID }}">
+                                    + 입원 수속 진행
+                                </button>
+                            </td>
+                        </tr>
+                        
+                        <!-- 입원 수속 모달 -->
+                        <div class="modal fade" id="admitModal-{{ p.RECEPTION_ID }}" tabindex="-1" aria-hidden="true">
+                            <div class="modal-dialog">
+                                <div class="modal-content">
+                                    <form action="{{ url_for('admission.process_admission') }}" method="POST">
+                                        <input type="hidden" name="reception_id" value="{{ p.RECEPTION_ID }}">
+                                        <input type="hidden" name="record_id" value="{{ p.RECORD_ID }}">
+                                        <div class="modal-header bg-primary text-white">
+                                            <h5 class="modal-title">환자 입원 배정 - {{ p.PATIENT_NAME }} 님</h5>
+                                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                        </div>
+                                        <div class="modal-body text-start">
+                                            <div class="mb-3">
+                                                <label class="form-label fw-bold">빈 병상 선택</label>
+                                                <select class="form-select" name="bed_id" required>
+                                                    <option value="">-- 병상 선택 --</option>
+                                                    {% for eb in empty_beds %}
+                                                        <option value="{{ eb.BED_ID }}">{{ eb.ROOM_NO }}호 - {{ eb.BED_NO }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label class="form-label fw-bold">입원 사유 (Reason)</label>
+                                                <textarea class="form-control" name="reason" rows="3" required>{{ p.DIAGNOSIS }} </textarea>
+                                            </div>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+                                            <button type="submit" class="btn btn-primary">입원 완료</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        {% else %}
+                        <tr>
+                            <td colspan="5" class="text-center py-4 text-muted">입원 수속 대기 중인 환자가 없습니다.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. 현재 입원(재원) 환자 목록 -->
+    <div class="col-md-12">
+        <div class="card shadow-sm border-danger">
+            <div class="card-header bg-danger text-white fw-bold">
+                🛏️ 현재 재원 중인 환자 목록 (퇴원 처리)
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0 text-center align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>환자명</th>
+                            <th>병실 / 병상</th>
+                            <th>담당의</th>
+                            <th>입원 일시</th>
+                            <th>입원 사유</th>
+                            <th>퇴원 관리</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for a in admitted_patients %}
+                        <tr>
+                            <td><strong>{{ a.PATIENT_NAME }}</strong></td>
+                            <td class="fw-bold text-primary">{{ a.ROOM_NO }}호 - {{ a.BED_NO }}</td>
+                            <td>{{ a.DOC_NAME }} 의사</td>
+                            <td>{{ a.ADMIT_TIME }}</td>
+                            <td class="text-start">{{ a.REASON }}</td>
+                            <td>
+                                <form action="{{ url_for('admission.process_discharge') }}" method="POST" onsubmit="return confirm('해당 환자를 퇴원 수속(수납 대기) 처리하시겠습니까?');">
+                                    <input type="hidden" name="admit_id" value="{{ a.ADMIT_ID }}">
+                                    <input type="hidden" name="bed_id" value="{{ a.BED_ID }}">
+                                    <input type="hidden" name="reception_id" value="{{ a.RECEPTION_ID }}">
+                                    <button type="submit" class="btn btn-sm btn-danger">퇴원 수속</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center py-4 text-muted">현재 재원 중인 환자가 없습니다.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block title %}수납·결제 - Hospital PMS{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>💳 원무과 수납·결제 창구</h2>
+</div>
+
+<!-- 1. 수납 대기 환자 목록 -->
+<div class="card shadow-sm border-success mb-4">
+    <div class="card-header bg-success text-white fw-bold">
+        📋 수납 대기 환자 목록 (외래 완료 및 퇴원 수속 환자)
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0 text-center align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>접수번호</th>
+                    <th>환자명</th>
+                    <th>생년월일</th>
+                    <th>구분</th>
+                    <th>담당의</th>
+                    <th>진단명</th>
+                    <th>총 청구금액</th>
+                    <th>수납 관리</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for b in waiting_bills %}
+                <tr>
+                    <td>{{ b.RECEPTION_ID }}</td>
+                    <td><strong>{{ b.PATIENT_NAME }}</strong> ({{ '남' if b.GENDER == 'M' else '여' }})</td>
+                    <td>{{ b.BIRTH_DATE }}</td>
+                    <td>
+                        {% if b.APPT_STATUS == '퇴원수납대기' %}
+                            <span class="badge bg-danger">입원/퇴원</span>
+                        {% else %}
+                            <span class="badge bg-primary">외래진료</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ b.DOC_NAME }} 의사</td>
+                    <td class="text-danger fw-bold">{{ b.DIAGNOSIS or '미기록' }}</td>
+                    <td class="fw-bold text-success fs-5">{{ "{:,}".format(b.grand_total) }}원</td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-outline-success fw-bold" data-bs-toggle="modal" data-bs-target="#billModal-{{ b.RECEPTION_ID }}">
+                            🧾 세부 영수증 / 결제
+                        </button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" class="text-center py-5 text-muted">
+                        현재 수납 대기 중인 환자가 없습니다.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ==================== 테이블 바깥: 단일 통합 수납 모달 영역 ==================== -->
+{% for b in waiting_bills %}
+<div class="modal fade" id="billModal-{{ b.RECEPTION_ID }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form action="{{ url_for('payment.process_payment') }}" method="POST">
+                <input type="hidden" name="reception_id" value="{{ b.RECEPTION_ID }}">
+                <input type="hidden" name="total_amt" value="{{ b.grand_total }}">
+                
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title">🧾 진료비 상세 영수증 - {{ b.PATIENT_NAME }} 님</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-start">
+                    <div class="d-flex justify-content-between mb-3 border-bottom pb-2">
+                        <span><strong>접수번호:</strong> {{ b.RECEPTION_ID }}</span>
+                        <span><strong>진료일시:</strong> {{ b.TREAT_TIME }}</span>
+                        <span><strong>담당의:</strong> {{ b.DOC_NAME }} 의사</span>
+                    </div>
+                    <table class="table table-bordered mb-3">
+                        <thead class="table-light text-center">
+                            <tr>
+                                <th style="width: 25%;">항목 구분</th>
+                                <th style="width: 50%;">상세 산정 내역</th>
+                                <th style="width: 25%;">금액</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="text-center fw-bold">기본 진찰료</td>
+                                <td>외래 진찰료 (기본 수가)</td>
+                                <td class="text-end">{{ "{:,}".format(b.base_fee) }}원</td>
+                            </tr>
+                            <tr>
+                                <td class="text-center fw-bold">검사료 합계</td>
+                                <td>
+                                    {% for t in b.test_list %}
+                                        <div>{{ t.TEST_NAME }} ({{ "{:,}".format(t.PRICE) }}원)</div>
+                                    {% else %}
+                                        <span class="text-muted">검사 내역 없음</span>
+                                    {% endfor %}
+                                </td>
+                                <td class="text-end">{{ "{:,}".format(b.test_total) }}원</td>
+                            </tr>
+                            <tr>
+                                <td class="text-center fw-bold">약제비 합계</td>
+                                <td>
+                                    {% for m in b.med_list %}
+                                        <div>{{ m.MED_NAME }} ({{ m.DOSE_AMOUNT }}T × {{ m.DAILY_COUNT }}회 × {{ m.TOTAL_DAYS }}일)</div>
+                                    {% else %}
+                                        <span class="text-muted">원내 처방 약품 없음</span>
+                                    {% endfor %}
+                                </td>
+                                <td class="text-end">{{ "{:,}".format(b.med_total) }}원</td>
+                            </tr>
+                            {% if b.room_total > 0 %}
+                            <tr>
+                                <td class="text-center fw-bold text-danger">입원 병실료</td>
+                                <td class="text-danger">{{ b.room_desc }}</td>
+                                <td class="text-end text-danger">{{ "{:,}".format(b.room_total) }}원</td>
+                            </tr>
+                            {% endif %}
+                            <tr class="table-warning fs-5">
+                                <th colspan="2" class="text-center">최종 납부 총액</th>
+                                <th class="text-end text-danger">{{ "{:,}".format(b.grand_total) }}원</th>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">결제 수단</label>
+                        <select class="form-select" name="pay_method">
+                            <option value="신용카드">신용카드</option>
+                            <option value="체크카드">체크카드</option>
+                            <option value="현금">현금</option>
+                            <option value="계좌이체">계좌이체</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+                    <button type="submit" class="btn btn-success fw-bold">결제 승인 (수납 완료)</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+<!-- 2. 최근 수납 완료 이력 -->
+<div class="card shadow-sm border-secondary">
+    <div class="card-header bg-secondary text-white fw-bold">
+        🕒 최근 수납 완료 내역 (최근 10건)
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0 text-center align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>결제번호</th>
+                    <th>접수번호</th>
+                    <th>환자명</th>
+                    <th>결제금액</th>
+                    <th>결제수단</th>
+                    <th>상태</th>
+                    <th>결제일시</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for h in payment_history %}
+                <tr>
+                    <td>{{ h.PAY_ID }}</td>
+                    <td>{{ h.RECEPTION_ID }}</td>
+                    <td><strong>{{ h.PATIENT_NAME }}</strong></td>
+                    <td class="fw-bold">{{ "{:,}".format(h.TOTAL_AMT) }}원</td>
+                    <td>{{ h.PAY_METHOD }}</td>
+                    <td><span class="badge bg-success">{{ h.STATUS }}</span></td>
+                    <td>{{ h.PAY_TIME }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="text-center py-4 text-muted">완료된 수납 내역이 없습니다.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

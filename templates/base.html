@@ -35,10 +35,10 @@
                         <a class="nav-link" href="{{ url_for('lab.test_list') }}">검사실</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#">입·퇴원 관리</a>
+                        <a class="nav-link" href="{{ url_for('admission.admission_list') }}">입·퇴원 관리</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#">수납·결제</a>
+                        <a class="nav-link" href="{{ url_for('payment.payment_list') }}">수납·결제</a>
                     </li>
                 </ul>
             </div>

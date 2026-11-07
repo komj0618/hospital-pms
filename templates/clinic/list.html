@@ -19,7 +19,7 @@
     </form>
 </div>
 
-<!-- 대기 환자 목록 테이블 (모달 태그를 완전히 밖으로 분리) -->
+<!-- 내 진료 대기 환자 목록 테이블 -->
 <div class="card shadow-sm border-primary mb-4">
     <div class="card-header bg-primary text-white fw-bold">
         📋 내 진료 대기 환자 목록
@@ -100,6 +100,43 @@
                 </div>
                 
                 <div class="modal-body text-start">
+                    <!-- 환자 과거 병력 아코디언 조회 -->
+                    <div class="accordion mb-3" id="historyAccordion-{{ p.RECEPTION_ID }}">
+                        <div class="accordion-item border-info">
+                            <h2 class="accordion-header" id="headingHist-{{ p.RECEPTION_ID }}">
+                                <button class="accordion-button collapsed bg-light text-primary fw-bold py-2" type="button" data-bs-toggle="collapse" data-bs-target="#collapseHist-{{ p.RECEPTION_ID }}">
+                                    📜 과거 진료 이력 조회 (총 {{ p.past_history|length }}건)
+                                </button>
+                            </h2>
+                            <div id="collapseHist-{{ p.RECEPTION_ID }}" class="accordion-collapse collapse" data-bs-parent="#historyAccordion-{{ p.RECEPTION_ID }}">
+                                <div class="accordion-body p-2 bg-white">
+                                    {% if p.past_history %}
+                                        {% for hist in p.past_history %}
+                                        <div class="p-2 mb-2 border rounded bg-light">
+                                            <div class="d-flex justify-content-between small text-muted mb-1">
+                                                <span><strong>진료일시:</strong> {{ hist.TREAT_TIME }}</span>
+                                                <span><strong>담당의:</strong> {{ hist.DOC_NAME }} 의사</span>
+                                            </div>
+                                            <div class="small"><strong>호소증상:</strong> {{ hist.SYMPTOM }}</div>
+                                            <div class="small text-danger"><strong>진단명:</strong> {{ hist.DIAGNOSIS or '진단 미기록' }}</div>
+                                            {% if hist.prescriptions %}
+                                            <div class="mt-1 pt-1 border-top small">
+                                                <strong>과거 처방 약품:</strong>
+                                                {% for rx in hist.prescriptions %}
+                                                    <span class="badge bg-secondary me-1">{{ rx.MED_NAME }} ({{ rx.DOSE_AMOUNT }}T, {{ rx.DAILY_COUNT }}회, {{ rx.TOTAL_DAYS }}일)</span>
+                                                {% endfor %}
+                                            </div>
+                                            {% endif %}
+                                        </div>
+                                        {% endfor %}
+                                    {% else %}
+                                        <p class="text-muted small mb-0 text-center py-2">이전 진료 내역이 없는 초진 환자입니다.</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- 1. 환자 호소 증상 -->
                     <div class="mb-3">
                         <label class="form-label fw-bold">환자 호소 증상 (Symptom)</label>
@@ -108,7 +145,6 @@
 
                     <!-- 2. 검사 결과 또는 검사 오더 선택 구역 -->
                     {% if p.test_results %}
-                        <!-- 검사를 다녀온 환자인 경우: 결과 테이블 표시 -->
                         <div class="mb-3">
                             <label class="form-label fw-bold text-primary">🔬 검사실 판독 결과</label>
                             <div class="table-responsive">
@@ -135,7 +171,6 @@
                             </div>
                         </div>
                     {% else %}
-                        <!-- 초진 환자인 경우: 필요 시 검사 오더를 낼 수 있는 체크박스 제공 -->
                         <div class="mb-3 p-3 border rounded bg-light">
                             <label class="form-label fw-bold text-dark mb-2">🧪 필요 검사 선택 (검사실 이관 시 체크)</label>
                             <div class="row">
@@ -193,20 +228,28 @@
                             </tbody>
                         </table>
                     </div>
+
+                    <!-- 5. 입원 지시 체크박스 구역 -->
+                    <div class="mt-3 p-2 border border-warning rounded bg-light text-center">
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="admitCheck-{{ p.RECEPTION_ID }}" onchange="toggleAdmitButton('{{ p.RECEPTION_ID }}')">
+                            <label class="form-check-label fw-bold text-danger" for="admitCheck-{{ p.RECEPTION_ID }}">
+                                🏥 이 환자는 추가 입원 치료가 필요합니다 (입원 지시서 발행)
+                            </label>
+                        </div>
+                    </div>
                 </div>
                 
                 <div class="modal-footer d-flex justify-content-between">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
                     <div>
                         {% if not p.test_results %}
-                        <!-- 검사를 선택했을 때 검사실로 보내는 버튼 -->
                         <button type="submit" name="action" value="order_test" class="btn btn-outline-primary me-2">
                             🧪 검사 오더 발행 (검사실 이관)
                         </button>
                         {% endif %}
-                        <!-- 진료를 완전히 마치고 수납으로 보내는 버튼 -->
-                        <button type="submit" name="action" value="complete" class="btn btn-danger">
-                            🏁 진료 완료 및 수납 이관
+                        <button type="submit" name="action" value="complete" id="completeBtn-{{ p.RECEPTION_ID }}" class="btn btn-danger">
+                            🏁 진료 완료 (수납 이관)
                         </button>
                     </div>
                 </div>
@@ -227,9 +270,26 @@
 </datalist>
 
 <script>
+// 음수 부호(-) 및 지수(e, E) 입력 차단
 function preventNegativeInput(event) {
     if (event.key === '-' || event.key === '+' || event.key === 'e' || event.key === 'E') {
         event.preventDefault();
+    }
+}
+
+// 입원 지시 체크박스 토글 함수
+function toggleAdmitButton(receptionId) {
+    const checkbox = document.getElementById(`admitCheck-${receptionId}`);
+    const submitBtn = document.getElementById(`completeBtn-${receptionId}`);
+    
+    if (checkbox.checked) {
+        submitBtn.value = "admit";
+        submitBtn.innerHTML = "🏥 입원 지시 확정 (입·퇴원 창구 이관)";
+        submitBtn.className = "btn btn-warning text-dark fw-bold";
+    } else {
+        submitBtn.value = "complete";
+        submitBtn.innerHTML = "🏁 진료 완료 (수납 이관)";
+        submitBtn.className = "btn btn-danger";
     }
 }
 
